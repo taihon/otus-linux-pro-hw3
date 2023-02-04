@@ -50,83 +50,97 @@ Vagrant.configure("2") do |config|
             box.vm.provider :virtualbox do |vb|
                     vb.customize ["modifyvm", :id, "--memory", "256"]
                     needsController = false
-            boxconfig[:disks].each do |dname, dconf|
-                unless File.exist?(dconf[:dfile])
-                  vb.customize ['createhd', '--filename', dconf[:dfile], '--variant', 'Fixed', '--size', dconf[:size]]
-                                  needsController =  true
-                            end
-  
+				boxconfig[:disks].each do |dname, dconf|
+					unless File.exist?(dconf[:dfile])
+					vb.customize ['createhd', '--filename', dconf[:dfile], '--variant', 'Fixed', '--size', dconf[:size]]
+									needsController =  true
+					end
+				end
+				if needsController == true
+					vb.customize ["storagectl", :id, "--name", "SATA", "--add", "sata" ]
+					boxconfig[:disks].each do |dname, dconf|
+						vb.customize ['storageattach', :id,  '--storagectl', 'SATA', '--port', dconf[:port], '--device', 0, '--type', 'hdd', '--medium', dconf[:dfile]]
+					end
+				end
             end
-                    if needsController == true
-                       vb.customize ["storagectl", :id, "--name", "SATA", "--add", "sata" ]
-                       boxconfig[:disks].each do |dname, dconf|
-                           vb.customize ['storageattach', :id,  '--storagectl', 'SATA', '--port', dconf[:port], '--device', 0, '--type', 'hdd', '--medium', dconf[:dfile]]
-                       end
-                    end
-            end
-        # hw 3.1
-        box.vm.provision "shell", inline: <<-'SHELL'
-            mkdir -p ~root/.ssh
-            cp ~vagrant/.ssh/auth* ~root/.ssh
-            yum install -y mdadm smartmontools hdparm gdisk xfsdump
-	    pvcreate /dev/sdb
-	    vgcreate vg_tmproot /dev/sdb
-	    lvcreate -l +100%FREE -n lv_tmproot /dev/vg_tmproot
-	    mkfs.xfs /dev/vg_tmproot/lv_tmproot
-	    mkdir /mnt/tmproot
-	    mount /dev/vg_tmproot/lv_tmproot /mnt/tmproot
-	    xfsdump -J - /dev/VolGroup00/LogVol00 | xfsrestore -J - /mnt/tmproot
-	    for f in proc dev sys run boot; do mount --bind /$f /mnt/tmproot/$f ; done
-	    chroot /mnt/tmproot grub2-mkconfig -o /boot/grub2/grub.cfg
-	    dracut -f /boot/initramfs-$(uname -r).img $(uname -r)
-	    sed -i 's/rd.lvm.lv=VolGroup00\/LogVol00/rd.lvm.lv=vg_tmproot\/lv_tmproot/' /boot/grub2/grub.cfg
-          SHELL
+        	# hw 3.1
+        	box.vm.provision "shell", inline: <<-'SHELL'
+				mkdir -p ~root/.ssh
+				cp ~vagrant/.ssh/auth* ~root/.ssh
+				yum install -y mdadm smartmontools hdparm gdisk xfsdump
+				pvcreate /dev/sdb
+				vgcreate vg_tmproot /dev/sdb
+				lvcreate -l +100%FREE -n lv_tmproot /dev/vg_tmproot
+				mkfs.xfs /dev/vg_tmproot/lv_tmproot
+				mkdir /mnt/tmproot
+				mount /dev/vg_tmproot/lv_tmproot /mnt/tmproot
+				xfsdump -J - /dev/VolGroup00/LogVol00 | xfsrestore -J - /mnt/tmproot
+				for f in proc dev sys run boot; do mount --bind /$f /mnt/tmproot/$f ; done
+				chroot /mnt/tmproot grub2-mkconfig -o /boot/grub2/grub.cfg
+				dracut -f /boot/initramfs-$(uname -r).img $(uname -r)
+				sed -i 's/rd.lvm.lv=VolGroup00\/LogVol00/rd.lvm.lv=vg_tmproot\/lv_tmproot/' /boot/grub2/grub.cfg
+			SHELL
+			box.vm.provision "shell", reboot: true
+			box.vm.provision "shell", inline: <<-'SHELL'
+				lvremove /dev/VolGroup00/LogVol00 -y
+				lvcreate -L 8G -n LogVol00 /dev/VolGroup00
+				mkfs.xfs /dev/VolGroup00/LogVol00
+				mkdir /mnt/newroot
+				mount /dev/VolGroup00/LogVol00 /mnt/newroot
+				xfsdump -J - /dev/vg_tmproot/lv_tmproot | sudo xfsrestore -J - /mnt/newroot/
+				for i in proc dev sys run boot; do mount --bind /$i /mnt/newroot/$i ;done
+				chroot /mnt/newroot/ grub2-mkconfig -o /boot/grub2/grub.cfg
+				dracut -f /boot/initramfs-$(uname -r).img $(uname -r)
+	  		SHELL
 	
-	box.vm.provision "shell", reboot: true
-	box.vm.provision "shell", inline: <<-'SHELL'
-	    lvremove /dev/VolGroup00/LogVol00 -y
-	    lvcreate -L 8G -n LogVol00 /dev/VolGroup00
-	    mkfs.xfs /dev/VolGroup00/LogVol00
-	    mkdir /mnt/newroot
-	    mount /dev/VolGroup00/LogVol00 /mnt/newroot
-	    xfsdump -J - /dev/vg_tmproot/lv_tmproot | sudo xfsrestore -J - /mnt/newroot/
-	    for i in proc dev sys run boot; do mount --bind /$i /mnt/newroot/$i ;done
-	    chroot /mnt/newroot/ grub2-mkconfig -o /boot/grub2/grub.cfg
-	    dracut -f /boot/initramfs-$(uname -r).img $(uname -r)
-	  SHELL
-	
-	box.vm.provision "shell", reboot: true
-	box.vm.provision "shell", inline: <<-'SHELL'
-	    lvremove -y /dev/vg_tmproot/lv_tmproot
-	    lvremove -y /dev/vg_tmproot
-	  SHELL
-	# hw 3.2
-	box.vm.provision "shell", inline: <<-'SHELL'
-	    lvcreate -L 2G -n LogVol02home /dev/VolGroup00
-	    mkfs.xfs /dev/VolGroup00/LogVol02home
-	    mkdir /mnt/newhome
-	    mount /dev/VolGroup00/LogVol02home /mnt/newhome
-	    cp --preserve=context -rfp /home/* /mnt/newhome
-	    rm -rf /home/*
-	    umount /mnt/newhome
-	    mount /dev/VolGroup00/LogVol02home /home/
-	    echo 'UUID='`blkid /dev/VolGroup00/LogVol02home -s UUID -o value`'`/home	xfs	defaults	0 0' >> /etc/fstab
-	  SHELL
-	# hw 3.3
-	box.vm.provision "shell", inline: <<-'SHELL'
-	    pvcreate /dev/sdd /dev/sde
-	    vgcreate VolGroup01 /dev/sdd /dev/sde
-	    lvcreate -L 900M -m 1 -n LogVol03var /dev/VolGroup01
-	    mkfs.xfs /dev/VolGroup01/LogVol03var
-	    mkdir /mnt/newvar
-	    mount /dev/VolGroup01/LogVol03var /mnt/newvar
-	    cp --preserve=context -rfp /var/* /mnt/newvar/
-	    rm -rf /var/* 2>/dev/null
-	    umount /mnt/newvar
-	    mount /dev/VolGroup01/LogVol03var /var
-	    echo 'UUID='`blkid /dev/VolGroup01/LogVol03var -s UUID -o value`'	/var	xfs	defaults	0 0' >> /etc/fstab
-	  SHELL
-	end
-    end
-  end
-  
+			box.vm.provision "shell", reboot: true
+			box.vm.provision "shell", inline: <<-'SHELL'
+				lvremove -y /dev/vg_tmproot/lv_tmproot
+				lvremove -y /dev/vg_tmproot
+			SHELL
+			# hw 3.2
+			box.vm.provision "shell", inline: <<-'SHELL'
+				lvcreate -L 2G -n LogVol02home /dev/VolGroup00
+				mkfs.xfs /dev/VolGroup00/LogVol02home
+				mkdir /mnt/newhome
+				mount /dev/VolGroup00/LogVol02home /mnt/newhome
+				cp --preserve=context -rfp /home/* /mnt/newhome
+				rm -rf /home/*
+				umount /mnt/newhome
+				mount /dev/VolGroup00/LogVol02home /home/
+				echo 'UUID='`blkid /dev/VolGroup00/LogVol02home -s UUID -o value`'	/home	xfs	defaults	0 0' >> /etc/fstab
+			SHELL
+			# hw 3.3
+			box.vm.provision "shell", inline: <<-'SHELL'
+				wipefs -a /dev/sdd
+				wipefs -a /dev/sde
+				pvcreate /dev/sdd /dev/sde
+				vgcreate VolGroup01 /dev/sdd /dev/sde
+				lvcreate -L 900M -m 1 -n LogVol03var /dev/VolGroup01
+				mkfs.xfs /dev/VolGroup01/LogVol03var
+				mkdir /mnt/newvar
+				mount /dev/VolGroup01/LogVol03var /mnt/newvar
+				cp --preserve=context -rfp /var/* /mnt/newvar/
+				rm -rf /var/* 2>/dev/null
+				umount /mnt/newvar
+				mount /dev/VolGroup01/LogVol03var /var
+				echo 'UUID='`blkid /dev/VolGroup01/LogVol03var -s UUID -o value`'	/var	xfs	defaults	0 0' >> /etc/fstab
+			SHELL
+			# hw 3.5
+			box.vm.provision "shell", inline: <<-'SHELL'
+				lvcreate -L 1G -n LogVol04xfs /dev/VolGroup00 -y
+				lvcreate -L 1G -n LogVol05ext4 /dev/VolGroup00 -y
+				mkfs.xfs /dev/VolGroup00/LogVol04xfs
+				mkfs.ext4 /dev/VolGroup00/LogVol05ext4
+				mkdir /mnt/vg_00_lv_04
+				mkdir /mnt/vg_00_lv_05
+				echo 'UUID='`blkid /dev/VolGroup00/LogVol04xfs -s UUID -o value`'	/mnt/vg_00_lv_04 xfs	defaults 0 0' >> /etc/fstab
+				echo 'UUID='`blkid /dev/VolGroup00/LogVol05ext4 -s UUID -o value`'   /mnt/vg_00_lv_05 ext4	rw,nosuid 0 0' >> /etc/fstab
+				mount -a
+				echo '#!/bin/bash\necho "we should be running as root, o-la-la!"' >> /mnt/vg_00_lv_04/script.sh
+				echo 'if [ "$EUID" -ne 0 ] then echo "But we\'re not..." fi'>> /mnt/vg_00_lv_04/script.sh
+				chmod u+sx /mnt/vg_00_lv_04/script.sh
+			SHELL
+    	end
+  	end
+end
