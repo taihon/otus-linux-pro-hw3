@@ -137,8 +137,9 @@ Vagrant.configure("2") do |config|
 				echo 'UUID='`blkid /dev/VolGroup00/LogVol04xfs -s UUID -o value`'	/mnt/vg_00_lv_04 xfs	defaults 0 0' >> /etc/fstab
 				echo 'UUID='`blkid /dev/VolGroup00/LogVol05ext4 -s UUID -o value`'   /mnt/vg_00_lv_05 ext4	rw,nosuid 0 0' >> /etc/fstab
 				mount -a
-				echo '#!/bin/bash\necho "we should be running as root, o-la-la!"' >> /mnt/vg_00_lv_04/script.sh
-				echo 'if [ "$EUID" -ne 0 ] then echo "But we\'re not..." fi'>> /mnt/vg_00_lv_04/script.sh
+				echo '#!/bin/bash' > /mnt/vg_00_lv_04/script.sh
+				echo 'echo "we should be running as root, o-la-la!"' >> /mnt/vg_00_lv_04/script.sh
+				echo 'if [ "$EUID" -ne 0 ] then echo "But we are not..." fi'>> /mnt/vg_00_lv_04/script.sh
 				chmod u+sx /mnt/vg_00_lv_04/script.sh
 			SHELL
     	end
